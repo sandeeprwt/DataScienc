@@ -1,0 +1,257 @@
+select top 1 * from(
+        select
+            coalesce(
+                route.OriginatingAirport
+                + ' '
+                + isnull(origin.CityName, ' ')
+                + ' ' + isnull(origin.RegionName, ' ')
+                + ' ' + isnull(origin.CountryCode, ' ')
+                + ' - '
+                + route.DestinationAirport
+                + ' '
+                + isnull(destination.CityName, ' ')
+                + ' ' + isnull(destination.RegionName, ' ')
+                + ' ' + isnull(destination.CountryCode, ' ')
+                , 'Air Route' + bi.RoutingStr
+                , ' ') AS 'PurchaseDescription'
+            ,rtrim(coalesce(airline.Description, bi.AirlineCodeMarketing,bi.AirlineCodeOperating, ' ')) AS 'SupplierName'
+            ,'Air Route ' + bi.RoutingStr AS 'SupplierAddress1'
+            ,' ' AS 'SupplierAddress2'
+            ,' ' AS 'SupplierAddress3'
+            ,isnull(origin.CityName, ' ') AS 'SupplierCityName'
+            ,isnull(origin.RegionName, ' ') AS 'SupplierRegionName'
+            ,' ' AS 'SupplierPostalCode'
+            ,isnull(origin.CountryCode, ' ') AS 'SupplierCountryCode'
+            ,convert(varchar, bi.UseDateBegin, 101) AS 'UseDateBegin'
+            ,convert(varchar, bi.UseDateEnd, 101) AS 'UseDateEnd'
+            ,bi.GrossBookingsUSD AS 'PurchaseAmtUSD'
+            ,isnull(xrate.CurrencyCode, null) AS 'CurrencyCode'
+            ,0 AS 'PurchaseType'
+            ,bi.BookingSystemID AS 'GroupingID'
+            ,cast(bi.BookingID as varchar) AS 'ItemID'
+            ,case
+                when bi.WizardID = 9 then 0
+                else 1
+             end AS 'DisplayPrice'
+            ,' ' AS 'SupplierPhone'
+            ,' ' AS 'Action'
+            ,0 AS 'PurchasePoints'
+            ,null AS 'OpaqueStatement'
+            ,bi.AgentAssistedBool
+            ,'Air' AS ProductType
+            ,0 AS PurchaseAmt
+        from dms.dbo.Dispute dispute
+        join dms.dbo.DMSPayment pay with(nolock)
+            on dispute.TravelProductID = pay.TravelProductID
+            and dispute.PaymentID = pay.PaymentID
+        join dms.dbo.DMSBookingItem bi with(nolock)
+            on bi.TRL = pay.TRL
+            and bi.TravelProductID = pay.TravelProductID
+        left join dms.dbo.Route route with(nolock)
+            on route.RouteID = bi.RoutingID
+        left join DSSDomain.dbo.Airport origin with(nolock)
+            on route.OriginatingAirport = origin.AirportCode
+        left join DSSDomain.dbo.Airport destination with(nolock)
+            on route.DestinationAirport = destination.AirportCode
+        left join DSSDomain.dbo.Airline airline with(nolock)
+            on airline.AirlineCode = isnull(bi.AirlineCodeMarketing,bi.AirlineCodeOperating)
+        left join dms.dbo.ExchangeRateDaily xrate with(nolock)
+            on Cast(Convert(varchar, bi.Createdate,101) as datetime) = xrate.ExchangeRateDate
+            and pay.PaymentCurrencyCode = xrate.CurrencyCode
+        where dispute.DisputeID = 725927
+        and bi.BookingSystemID in (7,8)
+        and ((dispute.MatchingSourceID = 0 and dispute.DisputePaymentID IS NULL) or dispute.MatchingSourceID = 1)
+        union all
+        select
+         bi.BookingItemDesc AS 'PurchaseDescription'
+        ,bi.SupplierName AS 'SupplierName'
+        ,isnull(hp.StreetAddress1, ' ') AS 'SupplierAddress1'
+        ,isnull(hp.StreetAddress2, ' ') AS 'SupplierAddress2'
+        ,' ' AS 'SupplierAddress3'
+        ,isnull(hp.CityName, ' ') AS 'SupplierCityName'
+        ,isnull(hp.StateRegionName, ' ') AS 'SupplierRegionName'
+        ,isnull(hp.PostalCode, ' ') AS 'SupplierPostalCode'
+        ,isnull(hp.ISOCountryCode, ' ') AS 'SupplierCountryCode'
+        ,convert(varchar, isnull(min(BookedBookingItem.UseDateBegin), min(bi.UseDateBegin)), 101) AS 'UseDateBegin'
+        ,convert(varchar, isnull(min(BookedBookingItem.UseDateEnd), min(bi.UseDateEnd)), 101) AS 'UseDateEnd'
+        ,sum(isnull(bi.GrossBookingsUSD, 0.0)) AS 'PurchaseAmtUSD'
+        ,'USD' AS 'CurrencyCode'
+        ,1 AS 'PurchaseType'
+        ,bi.BookingSystemID AS 'GroupingID'
+        ,cast(bi.BookingID as varchar) AS 'ItemID'
+        ,case
+            when bi.WizardID = 9 then 0
+            else 1
+         end AS 'DisplayPrice'
+        ,isnull(bi.SupplierPhone, ' ') AS 'SupplierPhone'
+        ,case
+            when sum(isnull(bi.GrossBookingsUSD, 0.0)) < 0 then 'Refunded'
+            when sum(isnull(bi.GrossBookingsUSD, 0.0)) > 0 then 'Charged'
+            else ' '
+         end AS 'Action' 
+        ,0 AS 'PurchasePoints'
+        ,case
+            when bi.RevenueReportingTypeID = 6
+            then 'Expedia Unpublished Rates ?All bookings are final and cannot be refunded, changed, or transferred.  The hotel name and street locations is shown only after customer books.'
+            else null
+         end AS 'OpaqueStatement'
+        ,max(bi.AgentAssistedBool) AS AgentAssistedBool
+        ,'Hotel' AS ProductType
+        ,0 AS PurchaseAmt
+        from Dispute dispute
+        join dms.dbo.DMSPayment pay with (nolock)
+            on dispute.TravelProductID = pay.TravelProductID
+            and dispute.PaymentID = pay.PaymentID
+        join DMSBookingItem bi with (nolock)
+            on bi.TRL = pay.TRL
+            and bi.TravelProductID = pay.TravelProductID
+        left join (
+            select
+            bi.BookingSystemID
+            ,bi.BookingItemID
+            ,bi.TimeID
+            ,bi.TranCount
+            ,convert(varchar, min(UseDateBegin), 101) as 'UseDateBegin'
+            ,convert(varchar, min(UseDateEnd), 101) as 'UseDateEnd'
+            from Dispute dispute
+            join DMSPayment pay with(nolock)
+                on dispute.TravelProductID = pay.TravelProductID
+                and dispute.PaymentID = pay.PaymentID
+            join DMSBookingItem bi
+                on bi.TRL = pay.TRL
+                and bi.TravelProductID = pay.TravelProductID
+            where CancelBool = 0
+            and dispute.DisputeID = 725927
+            group by
+                bi.BookingSystemID
+                ,bi.BookingItemID
+                ,bi.TimeID
+                ,bi.TranCount
+        ) as BookedBookingItem
+            on BookedBookingItem.BookingSystemID = bi.BookingSystemID
+            and BookedBookingItem.BookingItemID = bi.BookingItemID
+            and BookedBookingItem.TimeID = bi.TimeID
+            and BookedBookingItem.TranCount = bi.TranCount
+        left join DSSDomain.dbo.HotelProperty hp with(nolock)
+            on hp.HotelID = bi.HotelID
+        where
+            dispute.DisputeID = 725927
+            and bi.BookingSystemID not in (7,8)
+            and ((dispute.MatchingSourceID = 0 and dispute.DisputePaymentID IS NULL) or dispute.MatchingSourceID = 1)
+        group by
+             bi.timeid
+            ,bi.BookingItemDesc
+            ,bi.SupplierName
+            ,isnull(hp.StreetAddress1, ' ')
+            ,isnull(hp.StreetAddress2, ' ')
+            ,isnull(hp.CityName, ' ')
+            ,isnull(hp.StateRegionName, ' ')
+            ,isnull(hp.PostalCode, ' ')
+            ,isnull(hp.ISOCountryCode, ' ')
+            ,bi.BookingSystemID
+            ,bi.BookingID
+            ,case
+                when bi.WizardID = 9 then 0
+                else 1
+            end
+            ,isnull(bi.SupplierPhone, ' ')
+            ,bi.RevenueReportingTypeID
+        union all
+        select
+            coalesce(
+                tpa.OriginatingAirportCode
+                + ' '
+                + isnull(origin.CityName, ' ')
+                + ' ' + isnull(origin.RegionName, ' ')
+                + ' ' + isnull(origin.CountryCode, ' ')
+                + ' - '
+                + tpa.DestinationAirportCode
+                + ' '
+                + isnull(destination.CityName, ' ')
+                + ' ' + isnull(destination.RegionName, ' ')
+                + ' ' + isnull(destination.CountryCode, ' ')
+                , 'Air Route' + tpa.AirportPath
+                , ' ') AS 'PurchaseDescription'
+            ,rtrim(coalesce(airline.Description, tpa.AirlineCodeMarketing,tpa.AirlineCodeOperating, ' ')) AS 'SupplierName'
+            ,'Air Route ' + tpa.AirportPath AS 'SupplierAddress1'
+            ,' ' AS 'SupplierAddress2'
+            ,' ' AS 'SupplierAddress3'
+            ,isnull(origin.CityName, ' ') AS 'SupplierCityName'
+            ,isnull(origin.RegionName, ' ') AS 'SupplierRegionName'
+            ,' ' AS 'SupplierPostalCode'
+            ,isnull(origin.CountryCode, ' ') AS 'SupplierCountryCode'
+            ,convert(varchar, tp.TravelStartDate, 101) AS 'UseDateBegin'
+            ,convert(varchar, tp.TravelEndDate, 101) AS 'UseDateEnd'
+            ,tr.TransactionAmount AS 'PurchaseAmtUSD'
+            ,tr.CurrencyCode AS 'CurrencyCode'
+            ,0 AS 'PurchaseType'
+            ,NULL AS 'GroupingID'
+            ,NULL AS 'ItemID'
+            ,null AS 'DisplayPrice'
+            ,' ' AS 'SupplierPhone'
+            ,' ' AS 'Action'
+            ,0 AS 'PurchasePoints'
+            ,null AS 'OpaqueStatement'
+            ,tr.AgentAssistedFlag AS AgentAssistedBool
+            ,tp.ProductType
+            ,tr.TransactionAmount AS PurchaseAmt
+        from dms.dbo.Dispute dispute with(nolock)
+        join dms.dbo.Payment pay with(nolock)
+            on dispute.DisputePaymentID = pay.DisputePaymentID
+        join dms.dbo.[Transaction] tr with(nolock)
+            on pay.TransactionID = tr.TransactionID
+        left join dms.dbo.TransactionProduct tp with(nolock)
+            on tp.TransactionID = tr.TransactionID
+        left join dms.dbo.TransactionProductAir tpa with(nolock)
+            on tpa.TransactionProductID = tp.TransactionProductID
+        left outer join DSSDomain.dbo.Airport destination with(nolock)
+            on tpa.OriginatingAirportCode = destination.AirportCode
+        left outer join DSSDomain.dbo.Airport origin with(nolock)
+            on tpa.DestinationAirportCode = origin.AirportCode
+        left join DSSDomain.dbo.Airline airline with(nolock)
+            on airline.AirlineCode = isnull(tpa.AirlineCodeMarketing,tpa.AirlineCodeOperating)
+        where dispute.DisputeID = 725927
+            and tp.ProductType = 'Air'
+            and (dispute.MatchingSourceID in (3,2) or (dispute.MatchingSourceID = 0 and dispute.DisputePaymentID IS NOT NULL))
+        union all
+        select
+             tph.ProductDescription AS 'PurchaseDescription'
+            ,tph.HotelName AS 'SupplierName'
+            ,isnull(hp.StreetAddress1, ' ') AS 'SupplierAddress1'
+            ,isnull(hp.StreetAddress2, ' ') AS 'SupplierAddress2'
+            ,' ' AS 'SupplierAddress3'
+            ,isnull(hp.CityName, ' ') AS 'SupplierCityName'
+            ,isnull(hp.StateRegionName, ' ') AS 'SupplierRegionName'
+            ,isnull(hp.PostalCode, ' ') AS 'SupplierPostalCode'
+            ,isnull(hp.ISOCountryCode, ' ') AS 'SupplierCountryCode'
+            ,convert(varchar, tp.TravelStartDate, 101) AS 'UseDateBegin'
+            ,convert(varchar, tp.TravelEndDate, 101) AS 'UseDateEnd'
+            ,tr.TransactionAmount AS 'PurchaseAmtUSD'
+            ,tr.CurrencyCode AS 'CurrencyCode'
+            ,1 AS 'PurchaseType'
+            ,NULL AS 'GroupingID'
+            ,tph.BookingID AS 'ItemID'
+            ,NULL AS 'DisplayPrice'
+            ,isnull(tph.HotelPhone, ' ') AS 'SupplierPhone'
+            ,' ' AS 'Action'
+            ,0 AS 'PurchasePoints'
+            ,NULL AS 'OpaqueStatement'
+            ,tr.AgentAssistedFlag AS AgentAssistedBool
+            ,tp.ProductType
+            ,tr.TransactionAmount as PurchaseAmt
+        from dms.dbo.Dispute dispute with(nolock)
+        join dms.dbo.Payment pay with(nolock)
+            on dispute.DisputePaymentID = pay.DisputePaymentID
+        join dms.dbo.[Transaction] tr with(nolock)
+            on pay.TransactionID = tr.TransactionID
+        left join dms.dbo.TransactionProduct tp with(nolock)
+            on tp.TransactionID = tr.TransactionID
+        left join dms.dbo.TransactionProductHotel tph with(nolock)
+            on tph.TransactionProductID = tp.TransactionProductID
+        left join DSSDomain.dbo.HotelProperty hp with(nolock)
+            on cast(hp.HotelID as varchar) = tph.HotelID
+        where dispute.DisputeID = 725927
+            and tp.ProductType NOT LIKE 'Air'
+            and (dispute.MatchingSourceID in (3,2) or (dispute.MatchingSourceID = 0 and dispute.DisputePaymentID IS NOT NULL))
+    ) AS purchaseDetails
+    order by purchaseDetails.PurchaseType desc, purchaseDetails.PurchaseDescription desc, purchaseDetails.SupplierName desc;
